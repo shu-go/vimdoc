@@ -11,13 +11,28 @@ import (
 
 	"bitbucket.org/shu_go/gli"
 	"bitbucket.org/shu_go/xnotif/util/charconv"
+	"github.com/eidolon/wordwrap"
 )
 
-type globalCmd struct{}
+type globalCmd struct {
+	PkgName string `cli:"p, pkg, package"`
+}
 
 type docComment struct {
 	ShortDesc string
 	LongDesc  string
+}
+
+func (c docComment) String() string {
+	var s string
+	if c.ShortDesc != "" {
+		s = "  " + c.ShortDesc + "\n"
+	}
+	if c.LongDesc != "" {
+		s += "\n"
+		s += "  " + strings.ReplaceAll(c.LongDesc, "\n", "\n  ")
+	}
+	return s
 }
 
 type vimFunc struct {
@@ -26,13 +41,7 @@ type vimFunc struct {
 	docComment
 }
 
-type vimVar struct {
-	Name     string
-	DefValue string
-	docComment
-}
-
-func (f vimFunc) String() string {
+func (f vimFunc) Signature() string {
 	s := f.Name + "("
 	for i, p := range f.Params {
 		if i > 0 {
@@ -41,24 +50,54 @@ func (f vimFunc) String() string {
 		s += "{" + p + "}"
 	}
 	s += ")"
-	if f.Desc != "" {
+	return s
+}
+
+func (f vimFunc) String() string {
+	s := f.Signature()
+	if f.ShortDesc != "" {
 		s += "\n"
-		s += "  " + f.Desc + "\n"
+		s += f.docComment.String()
 	}
-	if f.Explanation != "" {
+	return s
+}
+
+type vimVar struct {
+	Name     string
+	DefValue string
+	docComment
+}
+
+func (v vimVar) String() string {
+	s := "let " + v.Name
+	if v.DefValue != "" {
+		s += " = " + v.DefValue
+	}
+	if v.ShortDesc != "" {
 		s += "\n"
-		s += "  " + strings.ReplaceAll(f.Explanation, "\n", "\n  ")
+		s += v.docComment.String()
 	}
 	return s
 }
 
 func (g globalCmd) Run(args []string) error {
-	var funcRE = regexp.MustCompile(`^\s*fu[a-z]*!?\s+(?P<name>[A-Za-z0-9#]+)\((?P<params>.*)\)`)
 	var commentRE = regexp.MustCompile(`^\s*"""\s*(?P<comment>.*)`)
+
+	var funcRE = regexp.MustCompile(`^\s*fu[a-z]*!?\s+(?P<name>[A-Za-z0-9#]+)\((?P<params>.*)\)`)
 	var paramsepRE = regexp.MustCompile(`\s*,\s*`)
 
+	var varRE = regexp.MustCompile(`^\s*let\s+(?P<name>g:[A-Za-z0-9]+)\s*=\s*(?P<defval>\S+)`)
+
+	const docWidth = 78
+	const specIndent = 16
+	const listIndent = 32
+	var specWrapeer = wordwrap.Wrapper(docWidth-specIndent, false)
+	var listWrapper = wordwrap.Wrapper(docWidth-listIndent, false)
+
+	var comment = docComment{}
+
 	funcs := []vimFunc{}
-	var currFunc vimFunc
+	vars := []vimVar{}
 
 	for _, f := range args {
 		content, err := ioutil.ReadFile(f)
@@ -76,50 +115,148 @@ func (g globalCmd) Run(args []string) error {
 
 		for scanner.Scan() {
 			line := scanner.Text()
-			subs := funcRE.FindStringSubmatch(line)
-			if len(subs) > 0 {
-				if len(subs) > 1 {
-					currFunc.Name = subs[1]
-				}
-				if len(subs) > 2 {
-					pp := paramsepRE.Split(subs[2], -1)
-					if len(pp) == 1 && pp[0] == "" {
-					} else {
-						currFunc.Params = pp
+
+			subs := commentRE.FindStringSubmatch(line)
+			if len(subs) > 1 {
+				if comment.ShortDesc == "" {
+					comment.ShortDesc = subs[1]
+				} else {
+					if comment.LongDesc != "" {
+						comment.LongDesc += "\n"
 					}
+					comment.LongDesc += subs[1]
 				}
 
 				continue
 			}
 
-			subs = commentRE.FindStringSubmatch(line)
+			subs = funcRE.FindStringSubmatch(line)
 			if len(subs) > 0 {
+				f := vimFunc{}
 				if len(subs) > 1 {
-					fmt.Printf("  %s\n", subs[1])
-					if currFunc.Desc == "" {
-						currFunc.Desc = subs[1]
+					f.Name = subs[1]
+				}
+				if len(subs) > 2 {
+					pp := paramsepRE.Split(subs[2], -1)
+					if len(pp) == 1 && pp[0] == "" {
 					} else {
-						if currFunc.Explanation == "" {
-							currFunc.Explanation = subs[1]
-						} else {
-							currFunc.Explanation += "\n" + subs[1]
-						}
+						f.Params = pp
 					}
 				}
 
+				f.docComment = comment
+				funcs = append(funcs, f)
+
+				comment = docComment{}
+
 				continue
-			} else if currFunc.Name != "" {
-				funcs = append(funcs, currFunc)
-				currFunc = vimFunc{}
+			}
+
+			subs = varRE.FindStringSubmatch(line)
+			if len(subs) > 0 {
+				v := vimVar{}
+				if len(subs) > 1 {
+					v.Name = subs[1]
+				}
+				if len(subs) > 2 {
+					v.DefValue = subs[2]
+				}
+
+				v.docComment = comment
+				vars = append(vars, v)
+
+				comment = docComment{}
+
+				continue
 			}
 
 			//subs = commentRE.FindStringSubmatch(line)
 			//if len(subs)
 		}
 
-		for _, f := range funcs {
-			fmt.Printf("%s\n", f)
+		if len(vars) > 0 {
+			title := "VARIABLES " +
+				strings.Repeat(" ", docWidth-len("VARIABLES ")-(len(g.PkgName)+len("*-variables*"))) +
+				"*" + g.PkgName + "-variables*"
+
+			fmt.Println(title)
+			fmt.Println("")
+
+			for _, v := range vars {
+				if v.ShortDesc == "" {
+					continue
+				}
+
+				// tag
+				tag := strings.Repeat(" ", docWidth-(len(v.Name)+2)) +
+					"*" + v.Name + "*"
+				fmt.Println(tag)
+
+				// name
+				fmt.Println(v.Name)
+
+				desc := specWrapeer(v.ShortDesc + "\n" + v.LongDesc)
+				fmt.Println(wordwrap.Indent(desc, strings.Repeat(" ", specIndent), false))
+			}
+
 		}
+
+		if len(funcs) > 0 {
+			fmt.Println("")
+
+			title := "FUNCTIONS " +
+				strings.Repeat(" ", docWidth-len("FUNCTIONS ")-(len(g.PkgName)+len("*-functions*"))) +
+				"*" + g.PkgName + "-functions*"
+
+			fmt.Println(title)
+			fmt.Println("")
+
+			fmt.Println("USAGE" + strings.Repeat(" ", listIndent-len("USAGE")) + "DESCRIPTION")
+			fmt.Println("")
+
+			for _, f := range funcs {
+				if f.ShortDesc == "" {
+					continue
+				}
+
+				sig := f.Signature()
+
+				sp := listIndent - len(sig)
+				if sp < 0 {
+					fmt.Println(sig)
+					sp = listIndent
+					fmt.Println(wordwrap.Indent(f.ShortDesc, strings.Repeat(" ", sp), false))
+				} else {
+					desc := listWrapper(f.ShortDesc)
+					fmt.Println(wordwrap.Indent(desc, sig+strings.Repeat(" ", sp), false))
+				}
+
+			}
+		}
+
+		if len(funcs) > 0 {
+			fmt.Println("")
+
+			for _, f := range funcs {
+				if f.LongDesc == "" {
+					continue
+				}
+
+				// tag
+				tag := strings.Repeat(" ", docWidth-(len(f.Name)+2+2)) +
+					"*" + f.Name + "()*"
+				fmt.Println(tag)
+
+				// signature
+				sig := f.Signature()
+				fmt.Println(sig)
+
+				desc := specWrapeer(f.LongDesc)
+				fmt.Println(wordwrap.Indent(desc, strings.Repeat(" ", 16), false))
+			}
+		}
+
+		fmt.Println("")
 	}
 
 	return nil
