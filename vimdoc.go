@@ -12,8 +12,10 @@ import (
 
 	"bitbucket.org/shu_go/gli"
 	"bitbucket.org/shu_go/xnotif/util/charconv"
+
 	"github.com/eidolon/wordwrap"
 	"github.com/mattn/go-zglob"
+	ww "github.com/mitchellh/go-wordwrap"
 )
 
 type globalCmd struct {
@@ -84,18 +86,20 @@ func (v vimVar) String() string {
 }
 
 func (g globalCmd) Run(args []string) error {
-	var commentRE = regexp.MustCompile(`^\s*"""\s*(?P<comment>.*)`)
+	var commentRE = regexp.MustCompile(`^\s*"""(?P<comment>.*)`)
 
-	var funcRE = regexp.MustCompile(`^\s*fu[a-z]*!?\s+(?P<name>[A-Za-z0-9#]+)\((?P<params>.*)\)`)
+	var funcRE = regexp.MustCompile(`^\s*fu[a-z]*!?\s+(?P<name>[A-Za-z0-9#_]+)\((?P<params>.*)\)`)
 	var paramsepRE = regexp.MustCompile(`\s*,\s*`)
 
-	var varRE = regexp.MustCompile(`^\s*let\s+(?P<name>g:[A-Za-z0-9]+)\s*=\s*(?P<defval>\S+)`)
+	var varRE = regexp.MustCompile(`^\s*let\s+(?P<name>g:[A-Za-z0-9_]+)\s*=\s*(?P<defval>\S+)`)
+
+	var eoquotRE = regexp.MustCompile(`\n\s*<`)
 
 	const docWidth = 78
 	const specIndent = 16
 	const listIndent = 32
-	var specWrapeer = wordwrap.Wrapper(docWidth-specIndent, false)
-	var listWrapper = wordwrap.Wrapper(docWidth-listIndent, false)
+	//var specWrapeer = wordwrap.Wrapper(docWidth-specIndent, false)
+	//var listWrapper = wordwrap.Wrapper(docWidth-listIndent, false)
 
 	var comment = docComment{}
 
@@ -134,11 +138,10 @@ func (g globalCmd) Run(args []string) error {
 				} else if comment.ShortDesc == "" {
 					comment.ShortDesc = subs[1]
 				} else {
-					if strings.TrimSpace(subs[1]) == "" {
-						comment.LongDesc += "\n\n"
-					} else {
-						comment.LongDesc += subs[1]
+					if comment.LongDesc != "" {
+						comment.LongDesc += "\n"
 					}
+					comment.LongDesc += subs[1]
 				}
 
 				continue
@@ -230,8 +233,13 @@ func (g globalCmd) Run(args []string) error {
 			// name
 			fmt.Println(v.Name)
 
-			desc := specWrapeer(v.ShortDesc + "\n" + v.LongDesc)
-			fmt.Println(wordwrap.Indent(desc, strings.Repeat(" ", specIndent), false))
+			//desc := specWrapeer(v.ShortDesc + "\n" + v.LongDesc)
+			//fmt.Println(wordwrap.Indent(desc, strings.Repeat(" ", specIndent), false))
+			//desc := strings.Repeat(" ", specIndent) + ww.WrapString(v.ShortDesc+"\n"+v.LongDesc, docWidth-specIndent)
+			desc := strings.Repeat(" ", specIndent) + v.ShortDesc + "\n" + v.LongDesc
+			desc = strings.ReplaceAll(desc, "\n", "\n"+strings.Repeat(" ", specIndent))
+			desc = eoquotRE.ReplaceAllLiteralString(desc, "\n<")
+			fmt.Println(desc)
 			fmt.Println("")
 		}
 
@@ -264,7 +272,7 @@ func (g globalCmd) Run(args []string) error {
 				sp = listIndent
 				fmt.Println(wordwrap.Indent(f.ShortDesc, strings.Repeat(" ", sp), false))
 			} else {
-				desc := listWrapper(f.ShortDesc)
+				desc := ww.WrapString(f.ShortDesc, docWidth-listIndent)
 				fmt.Println(wordwrap.Indent(desc, sig+strings.Repeat(" ", sp), false))
 			}
 
@@ -288,8 +296,13 @@ func (g globalCmd) Run(args []string) error {
 			sig := f.Signature()
 			fmt.Println(sig)
 
-			desc := specWrapeer(f.LongDesc)
-			fmt.Println(wordwrap.Indent(desc, strings.Repeat(" ", 16), false))
+			//desc := specWrapeer(f.LongDesc)
+			//fmt.Println(wordwrap.Indent(desc, strings.Repeat(" ", 16), false))
+			//desc := strings.Repeat(" ", 16) + ww.WrapString(f.LongDesc, docWidth-specIndent)
+			desc := strings.Repeat(" ", specIndent) + f.LongDesc
+			desc = strings.ReplaceAll(desc, "\n", "\n"+strings.Repeat(" ", specIndent))
+			desc = eoquotRE.ReplaceAllLiteralString(desc, "\n<")
+			fmt.Println(desc)
 			fmt.Println("")
 		}
 	}
