@@ -7,11 +7,13 @@ import (
 	"io/ioutil"
 	"os"
 	"regexp"
+	"sort"
 	"strings"
 
 	"bitbucket.org/shu_go/gli"
 	"bitbucket.org/shu_go/xnotif/util/charconv"
 	"github.com/eidolon/wordwrap"
+	"github.com/mattn/go-zglob"
 )
 
 type globalCmd struct {
@@ -21,6 +23,7 @@ type globalCmd struct {
 type docComment struct {
 	ShortDesc string
 	LongDesc  string
+	SortKey   string
 }
 
 func (c docComment) String() string {
@@ -96,10 +99,18 @@ func (g globalCmd) Run(args []string) error {
 
 	var comment = docComment{}
 
-	funcs := []vimFunc{}
-	vars := []vimVar{}
+	var funcs []vimFunc
+	var vars []vimVar
 
-	for _, f := range args {
+	var files []string
+	for _, a := range args {
+		ff, err := zglob.Glob(a)
+		if err == nil {
+			files = append(files, ff...)
+		}
+	}
+
+	for _, f := range files {
 		content, err := ioutil.ReadFile(f)
 		if err != nil {
 			return err
@@ -118,13 +129,16 @@ func (g globalCmd) Run(args []string) error {
 
 			subs := commentRE.FindStringSubmatch(line)
 			if len(subs) > 1 {
-				if comment.ShortDesc == "" {
+				if strings.HasPrefix(strings.TrimSpace(subs[1]), "sort:") {
+					comment.SortKey = strings.TrimSpace(subs[1][6:])
+				} else if comment.ShortDesc == "" {
 					comment.ShortDesc = subs[1]
 				} else {
-					if comment.LongDesc != "" {
-						comment.LongDesc += "\n"
+					if strings.TrimSpace(subs[1]) == "" {
+						comment.LongDesc += "\n\n"
+					} else {
+						comment.LongDesc += subs[1]
 					}
-					comment.LongDesc += subs[1]
 				}
 
 				continue
@@ -170,94 +184,117 @@ func (g globalCmd) Run(args []string) error {
 				continue
 			}
 
+			if strings.TrimSpace(line) != "" {
+				comment = docComment{}
+			}
 			//subs = commentRE.FindStringSubmatch(line)
 			//if len(subs)
 		}
-
-		if len(vars) > 0 {
-			title := "VARIABLES " +
-				strings.Repeat(" ", docWidth-len("VARIABLES ")-(len(g.PkgName)+len("*-variables*"))) +
-				"*" + g.PkgName + "-variables*"
-
-			fmt.Println(title)
-			fmt.Println("")
-
-			for _, v := range vars {
-				if v.ShortDesc == "" {
-					continue
-				}
-
-				// tag
-				tag := strings.Repeat(" ", docWidth-(len(v.Name)+2)) +
-					"*" + v.Name + "*"
-				fmt.Println(tag)
-
-				// name
-				fmt.Println(v.Name)
-
-				desc := specWrapeer(v.ShortDesc + "\n" + v.LongDesc)
-				fmt.Println(wordwrap.Indent(desc, strings.Repeat(" ", specIndent), false))
-			}
-
-		}
-
-		if len(funcs) > 0 {
-			fmt.Println("")
-
-			title := "FUNCTIONS " +
-				strings.Repeat(" ", docWidth-len("FUNCTIONS ")-(len(g.PkgName)+len("*-functions*"))) +
-				"*" + g.PkgName + "-functions*"
-
-			fmt.Println(title)
-			fmt.Println("")
-
-			fmt.Println("USAGE" + strings.Repeat(" ", listIndent-len("USAGE")) + "DESCRIPTION")
-			fmt.Println("")
-
-			for _, f := range funcs {
-				if f.ShortDesc == "" {
-					continue
-				}
-
-				sig := f.Signature()
-
-				sp := listIndent - len(sig)
-				if sp < 0 {
-					fmt.Println(sig)
-					sp = listIndent
-					fmt.Println(wordwrap.Indent(f.ShortDesc, strings.Repeat(" ", sp), false))
-				} else {
-					desc := listWrapper(f.ShortDesc)
-					fmt.Println(wordwrap.Indent(desc, sig+strings.Repeat(" ", sp), false))
-				}
-
-			}
-		}
-
-		if len(funcs) > 0 {
-			fmt.Println("")
-
-			for _, f := range funcs {
-				if f.LongDesc == "" {
-					continue
-				}
-
-				// tag
-				tag := strings.Repeat(" ", docWidth-(len(f.Name)+2+2)) +
-					"*" + f.Name + "()*"
-				fmt.Println(tag)
-
-				// signature
-				sig := f.Signature()
-				fmt.Println(sig)
-
-				desc := specWrapeer(f.LongDesc)
-				fmt.Println(wordwrap.Indent(desc, strings.Repeat(" ", 16), false))
-			}
-		}
-
-		fmt.Println("")
 	}
+
+	// sort
+	sort.Slice(vars, func(i, j int) bool {
+		if vars[i].SortKey < vars[j].SortKey {
+			return true
+		} else {
+			return vars[i].Name < vars[j].Name
+		}
+	})
+	sort.Slice(funcs, func(i, j int) bool {
+		if funcs[i].SortKey < funcs[j].SortKey {
+			return true
+		} else {
+			return funcs[i].Name < funcs[j].Name
+		}
+	})
+
+	if len(vars) > 0 {
+		title := "VARIABLES " +
+			strings.Repeat(" ", docWidth-len("VARIABLES ")-(len(g.PkgName)+len("*-variables*"))) +
+			"*" + g.PkgName + "-variables*"
+
+		fmt.Println(strings.Repeat("=", docWidth))
+		fmt.Println(title)
+		fmt.Println("")
+
+		for _, v := range vars {
+			if v.ShortDesc == "" {
+				continue
+			}
+
+			// tag
+			tag := strings.Repeat(" ", docWidth-(len(v.Name)+2)) +
+				"*" + v.Name + "*"
+			fmt.Println(tag)
+
+			// name
+			fmt.Println(v.Name)
+
+			desc := specWrapeer(v.ShortDesc + "\n" + v.LongDesc)
+			fmt.Println(wordwrap.Indent(desc, strings.Repeat(" ", specIndent), false))
+			fmt.Println("")
+		}
+
+	}
+
+	if len(funcs) > 0 {
+		fmt.Println("")
+
+		title := "FUNCTIONS " +
+			strings.Repeat(" ", docWidth-len("FUNCTIONS ")-(len(g.PkgName)+len("*-functions*"))) +
+			"*" + g.PkgName + "-functions*"
+
+		fmt.Println(strings.Repeat("=", docWidth))
+		fmt.Println(title)
+		fmt.Println("")
+
+		fmt.Println("USAGE" + strings.Repeat(" ", listIndent-len("USAGE")) + "DESCRIPTION")
+		fmt.Println("")
+
+		for _, f := range funcs {
+			if f.ShortDesc == "" {
+				continue
+			}
+
+			sig := f.Signature()
+
+			sp := listIndent - len(sig)
+			if sp < 0 {
+				fmt.Println(sig)
+				sp = listIndent
+				fmt.Println(wordwrap.Indent(f.ShortDesc, strings.Repeat(" ", sp), false))
+			} else {
+				desc := listWrapper(f.ShortDesc)
+				fmt.Println(wordwrap.Indent(desc, sig+strings.Repeat(" ", sp), false))
+			}
+
+		}
+	}
+
+	if len(funcs) > 0 {
+		fmt.Println("")
+
+		for _, f := range funcs {
+			if f.LongDesc == "" {
+				continue
+			}
+
+			// tag
+			tag := strings.Repeat(" ", docWidth-(len(f.Name)+2+2)) +
+				"*" + f.Name + "()*"
+			fmt.Println(tag)
+
+			// signature
+			sig := f.Signature()
+			fmt.Println(sig)
+
+			desc := specWrapeer(f.LongDesc)
+			fmt.Println(wordwrap.Indent(desc, strings.Repeat(" ", 16), false))
+			fmt.Println("")
+		}
+	}
+
+	fmt.Println("")
 
 	return nil
 }
