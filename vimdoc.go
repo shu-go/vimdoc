@@ -199,6 +199,8 @@ func (g globalCmd) Run(args []string) error {
 	sort.Slice(vars, func(i, j int) bool {
 		if vars[i].SortKey < vars[j].SortKey {
 			return true
+		} else if vars[i].SortKey > vars[j].SortKey {
+			return false
 		} else {
 			return vars[i].Name < vars[j].Name
 		}
@@ -206,6 +208,8 @@ func (g globalCmd) Run(args []string) error {
 	sort.Slice(funcs, func(i, j int) bool {
 		if funcs[i].SortKey < funcs[j].SortKey {
 			return true
+		} else if funcs[i].SortKey > funcs[j].SortKey {
+			return false
 		} else {
 			return funcs[i].Name < funcs[j].Name
 		}
@@ -231,7 +235,7 @@ func (g globalCmd) Run(args []string) error {
 			fmt.Println(tag)
 
 			// name
-			fmt.Println(v.Name)
+			fmt.Println(v.Name + " = " + v.DefValue)
 
 			//desc := specWrapeer(v.ShortDesc + "\n" + v.LongDesc)
 			//fmt.Println(wordwrap.Indent(desc, strings.Repeat(" ", specIndent), false))
@@ -242,7 +246,6 @@ func (g globalCmd) Run(args []string) error {
 			fmt.Println(desc)
 			fmt.Println("")
 		}
-
 	}
 
 	if len(funcs) > 0 {
@@ -256,7 +259,7 @@ func (g globalCmd) Run(args []string) error {
 		fmt.Println(title)
 		fmt.Println("")
 
-		fmt.Println("USAGE" + strings.Repeat(" ", listIndent-len("USAGE")) + "DESCRIPTION")
+		fmt.Println("USAGE" + strings.Repeat(" ", listIndent-len("USAGE")) + "DESCRIPTION~")
 		fmt.Println("")
 
 		for _, f := range funcs {
