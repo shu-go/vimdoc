@@ -10,8 +10,8 @@ import (
 	"sort"
 	"strings"
 
-	"bitbucket.org/shu_go/gli"
-	"bitbucket.org/shu_go/xnotif/util/charconv"
+	"github.com/shu-go/gli"
+	"github.com/shu-go/xnotif/util/charconv"
 
 	"github.com/eidolon/wordwrap"
 	"github.com/mattn/go-zglob"
